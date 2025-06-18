@@ -1,0 +1,445 @@
+<!--
+    This is only a study of Liquid Glass effect, following the Apple new design trend.
+
+    I didn't lose too much time in this, it was just supposed to see the effect across multiple devices.
+
+    THIS IS USING THREE.JS AND SHADERS
+
+    Thanks to Supah: https://supah.it for the Liquid Glass shader effect.
+    https://www.shadertoy.com/view/WftXD2
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Liquid Glass Shader</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #111;
+            color: white;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        #phone-case {
+            background: #000;
+            padding: 20px;
+            border-radius: 40px;
+            box-shadow: 0 0 30px rgba(0,0,0,0.5);
+            position: relative;
+        }
+        #canvas-container {
+            width: 300px;
+            height: 650px;
+            position: relative;
+            border-radius: 30px;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+        }
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding-top: 60px;
+        }
+        #time {
+            font-size: 72px;
+            font-weight: 200;
+            letter-spacing: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div id="phone-case">
+        <div id="canvas-container">
+            <canvas id="c"></canvas>
+            <div id="overlay">
+                <div id="time"></div>
+            </div>
+        </div>
+    </div>
+
+    <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.157.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.157.0/examples/jsm/",
+                "lil-gui": "https://unpkg.com/lil-gui@0.19.1/dist/lil-gui.esm.js",
+                "three/addons/postprocessing/EffectComposer.js": "https://unpkg.com/three@0.157.0/examples/jsm/postprocessing/EffectComposer.js",
+                "three/addons/postprocessing/RenderPass.js": "https://unpkg.com/three@0.157.0/examples/jsm/postprocessing/RenderPass.js",
+                "three/addons/postprocessing/ShaderPass.js": "https://unpkg.com/three@0.157.0/examples/jsm/postprocessing/ShaderPass.js",
+                "three/addons/shaders/FXAAShader.js": "https://unpkg.com/three@0.157.0/examples/jsm/shaders/FXAAShader.js",
+                "three/addons/libs/stats.module.js": "https://unpkg.com/three@0.157.0/examples/jsm/libs/stats.module.js"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { FontLoader } from 'three/addons/loaders/FontLoader.js';
+        import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
+        import GUI from 'lil-gui';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+        import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
+        import Stats from 'three/addons/libs/stats.module.js';
+
+        const stats = new Stats();
+        document.body.appendChild(stats.dom);
+
+        const canvas = document.querySelector('#c');
+        const renderer = new THREE.WebGLRenderer({ antialias: true, canvas });
+
+        const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -1, 1);
+        const scene = new THREE.Scene();
+        const geometry = new THREE.PlaneGeometry(2, 2);
+
+        const composer = new EffectComposer(renderer);
+        const renderPass = new RenderPass(scene, camera);
+        composer.addPass(renderPass);
+
+        const fxaaPass = new ShaderPass(FXAAShader);
+        composer.addPass(fxaaPass);
+
+        const uniforms = {
+            iTime: { value: 0 },
+            iResolution: { value: new THREE.Vector3() },
+            iMouse: { value: new THREE.Vector4() },
+            iChannel0: { value: null },
+            useTilingPattern: { value: false },
+            boxScale: { value: 1.0 },
+            animateBackground: { value: true },
+            tilingScale: { value: 5.0 },
+        };
+
+        const textureLoader = new THREE.TextureLoader();
+        const gui = new GUI();
+
+        // --- Background Controls ---
+        const bgFolder = gui.addFolder('Background');
+        const controls = {
+            mode: 'Tiling',
+            randomize: () => {
+                textureLoader.load(`https://picsum.photos/375/812?random=${Math.random()}`, (newTexture) => {
+                    if (uniforms.iChannel0.value) {
+                        uniforms.iChannel0.value.dispose();
+                    }
+                    uniforms.iChannel0.value = newTexture;
+                });
+            },
+            fxaa: true,
+        };
+
+        const randomizeController = bgFolder.add(controls, 'randomize').name('New Image');
+        const tileSizeController = bgFolder.add(uniforms.tilingScale, 'value', 5.0, 100.0, 1.0).name('Title Size');
+        const animateController = bgFolder.add(uniforms.animateBackground, 'value').name('Anim');
+
+        const updateBgControls = (mode) => {
+            const isTiling = mode === 'Tiling';
+            uniforms.useTilingPattern.value = isTiling;
+            randomizeController.domElement.style.display = isTiling ? 'none' : 'block';
+            tileSizeController.domElement.style.display = isTiling ? 'block' : 'none';
+            animateController.domElement.style.display = isTiling ? 'block' : 'none';
+        };
+
+        bgFolder.add(controls, 'mode', ['Image', 'Tiling']).name('Type').onChange(updateBgControls);
+        updateBgControls('Tiling'); // Set initial state
+
+        bgFolder.add(controls, 'fxaa').name('Anti-aliasing').onChange(value => {
+            fxaaPass.enabled = value;
+        });
+        bgFolder.open();
+
+        // --- Grid Controls ---
+        const gridFolder = gui.addFolder('Grid');
+        gridFolder.add(uniforms.boxScale, 'value', 0.5, 2.0, 0.01).name('Size');
+        gridFolder.open();
+
+        // --- Fragment Shader ---
+        // fragment shader from https://www.shadertoy.com/view/WftXD2
+        // Thanks for Supah: https://supah.it
+        const fragmentShader = `
+            uniform vec3 iResolution;
+            uniform vec4 iMouse;
+            uniform sampler2D iChannel0;
+            uniform bool useTilingPattern;
+            uniform float boxScale;
+            uniform bool animateBackground;
+            uniform float iTime;
+            uniform float tilingScale;
+
+            #define R     iResolution.xy
+            #define PI    3.14159265
+            #define S     smoothstep
+            #define PX(a) a/R.y
+
+            mat2 Rot (float a) {
+                return mat2(cos(a), -sin(a), sin(a), cos(a));
+            }
+
+            float Box (vec2 p, vec2 b) {
+                vec2 d = abs(p) - b;
+                return length(max(d,0.)) + min(max(d.x,d.y),0.);
+            }
+
+            vec4 LiquidGlass (sampler2D tex, vec2 uv, float direction, float quality, float size) {
+
+                vec2 radius = size/R;
+                vec4 color = texture(tex, uv);
+
+                for (float d = 0.; d < PI; d += PI/direction) {
+                    for (float i = 1./quality; i <= 1.; i += 1./quality) {
+                        color += texture(tex, uv + vec2(cos(d),sin(d)) * radius * i);
+                    }
+                }
+
+                color /= quality * direction;
+                return color;
+            }
+
+            vec4 Icon (vec2 uv) {
+                vec2 boxSize = vec2(PX(20.)) * boxScale;
+                float spacing = PX(50.) * boxScale;
+                const int num_cols = 3;
+                const int num_rows = 3;
+
+                float box = 1e6;
+
+                float totalWidth = float(num_cols) * (boxSize.x * 2. + spacing) - spacing;
+                float totalHeight = float(num_rows) * (boxSize.y * 2. + spacing) - spacing;
+                vec2 startOffset = vec2(
+                    -totalWidth / 2.0 + boxSize.x,
+                    totalHeight / 2.0 - boxSize.y
+                );
+
+                for (int j = 0; j < num_rows; j++) {
+                    for (int i = 0; i < num_cols; i++) {
+                        vec2 offset = vec2(
+                            startOffset.x + float(i) * (boxSize.x * 2. + spacing),
+                            startOffset.y - float(j) * (boxSize.y * 2. + spacing)
+                        );
+                        box = min(box, Box(uv - offset, boxSize));
+                    }
+                }
+
+                float s = boxSize.x;
+                float boxShape = S(PX(1.5), 0., box - s);
+                float boxDisp = S(s, 0., box - s * 0.5);
+                float boxLight = boxShape * S(0., s * 0.6, box - s * 0.8);
+                float icon = 0.0;
+                return vec4(boxShape, boxDisp, boxLight, icon);
+            }
+
+            void main() {
+                vec2 uv = gl_FragCoord.xy/R;
+                vec2 st = (gl_FragCoord.xy-.5*R)/R.y;
+                vec2 M  = iMouse.z > 0. ? (iMouse.xy-.5*R)/R.y : vec2(0.);
+
+                vec4 icon = Icon(st);
+
+                vec2 uv2 = uv - iMouse.xy/R;
+                uv2 *= S(-.2, 1., icon.y);
+                uv2 += iMouse.xy/R;
+
+                vec2 final_uv = uv;
+                vec2 final_uv2 = uv2;
+                if (animateBackground && useTilingPattern) {
+                    float speed = 0.1;
+                    vec2 dir = normalize(vec2(1.0, 1.0)); // 45 degrees
+                    final_uv += dir * iTime * speed;
+                    final_uv2 += dir * iTime * speed;
+                }
+
+                vec3 baseColor;
+                vec3 liquidColor;
+
+                if (useTilingPattern) {
+                    vec2 tiles = floor(final_uv * tilingScale);
+                    baseColor = vec3(mod(tiles.x + tiles.y, 2.0));
+
+                    vec2 liquidTiles = floor(final_uv2 * tilingScale);
+                    liquidColor = vec3(mod(liquidTiles.x + liquidTiles.y, 2.0));
+                } else {
+                    baseColor = texture(iChannel0, final_uv).rgb;
+                    liquidColor = LiquidGlass(iChannel0, final_uv2, 10., 10., 10.).rgb;
+                }
+
+                vec3 col = mix(baseColor * .8, .1 + liquidColor * .7, icon.x);
+                col += icon.z * .9 + icon.w;
+
+                gl_FragColor = vec4(col,1.0);
+            }
+        `;
+
+        textureLoader.load('https://picsum.photos/375/812', (texture) => {
+            uniforms.iChannel0.value = texture;
+            const material = new THREE.ShaderMaterial({
+                fragmentShader,
+                uniforms,
+            });
+
+            const mesh = new THREE.Mesh(geometry, material);
+            scene.add(mesh);
+
+            resizeRendererToDisplaySize(renderer);
+            addNumbers();
+
+            render();
+        });
+
+        function addNumbers() {
+            const fontLoader = new FontLoader();
+            fontLoader.load('https://unpkg.com/three@0.157.0/examples/fonts/helvetiker_regular.typeface.json', (font) => {
+                const canvas = renderer.domElement;
+                const R = { x: canvas.width, y: canvas.height };
+                const aspect = R.x / R.y;
+                const PX = (a) => a / R.y;
+
+                const boxSizeSt = { x: PX(20), y: PX(20) };
+                const spacingSt = PX(50);
+                const num_cols = 3;
+                const num_rows = 3;
+
+                const cellDimSt = {
+                    w: boxSizeSt.x * 2 + spacingSt,
+                    h: boxSizeSt.y * 2 + spacingSt
+                };
+
+                const totalDimSt = {
+                    w: num_cols * cellDimSt.w - spacingSt,
+                    h: num_rows * cellDimSt.h - spacingSt
+                };
+
+                const startOffsetSt = {
+                    x: -totalDimSt.w / 2.0 + boxSizeSt.x,
+                    y: totalDimSt.h / 2.0 - boxSizeSt.y
+                };
+
+                for (let j = 0; j < num_rows; j++) {
+                    for (let i = 0; i < num_cols; i++) {
+                        const num = j * num_cols + i + 1;
+
+                        const textGeo = new TextGeometry(num.toString(), {
+                            font: font,
+                            size: 0.08,
+                            height: 0.005,
+                            curveSegments: 4,
+                            bevelEnabled: false
+                        });
+                        textGeo.center();
+
+                        const textMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+                        const textMesh = new THREE.Mesh(textGeo, textMaterial);
+
+                        const offsetSt = {
+                            x: startOffsetSt.x + i * cellDimSt.w,
+                            y: startOffsetSt.y - j * cellDimSt.h
+                        };
+
+                        textMesh.position.x = 2 * offsetSt.x / aspect;
+                        textMesh.position.y = 2 * offsetSt.y;
+                        textMesh.position.z = 0.1;
+
+                        scene.add(textMesh);
+                    }
+                }
+            });
+        }
+
+        const mouse = new THREE.Vector2();
+        let mouseDown = false;
+
+        // Initialize mouse to center to avoid jumping from (0,0) on first frame
+        const rect = canvas.getBoundingClientRect();
+        mouse.x = rect.width / 2;
+        mouse.y = rect.height / 2;
+
+        function updateMouse(e) {
+            const rect = canvas.getBoundingClientRect();
+            mouse.x = e.clientX - rect.left;
+            mouse.y = rect.height - (e.clientY - rect.top) - 1; // Invert Y
+        }
+
+        canvas.addEventListener('mousemove', updateMouse);
+        canvas.addEventListener('mousedown', (e) => {
+            mouseDown = true;
+            updateMouse(e);
+        });
+        canvas.addEventListener('mouseup', () => {
+            mouseDown = false;
+        });
+        canvas.addEventListener('mouseleave', () => {
+            mouseDown = false;
+        });
+
+        // Touch events for mobile
+        canvas.addEventListener('touchmove', (e) => { e.preventDefault(); updateMouse(e.touches[0]); }, { passive: false });
+        canvas.addEventListener('touchstart', (e) => { e.preventDefault(); mouseDown = true; updateMouse(e.touches[0]); }, { passive: false });
+        canvas.addEventListener('touchend', (e) => { e.preventDefault(); mouseDown = false; }, { passive: false });
+
+        function resizeRendererToDisplaySize(renderer) {
+            const canvas = renderer.domElement;
+            const parent = canvas.parentElement;
+            const width = parent.clientWidth;
+            const height = parent.clientHeight;
+            const needResize = canvas.width !== width || canvas.height !== height;
+            if (needResize) {
+                renderer.setSize(width, height, false);
+                composer.setSize(width, height);
+                const pixelRatio = renderer.getPixelRatio();
+                fxaaPass.material.uniforms['resolution'].value.x = 1 / (canvas.width * pixelRatio);
+                fxaaPass.material.uniforms['resolution'].value.y = 1 / (canvas.height * pixelRatio);
+            }
+            return needResize;
+        }
+
+        const timeEl = document.getElementById('time');
+        function updateTime() {
+            const now = new Date();
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            timeEl.textContent = `${hours}:${minutes}`;
+        }
+
+        updateTime();
+        setInterval(updateTime, 1000);
+
+        function render(time) {
+            time *= 0.001;
+
+            stats.update();
+
+            resizeRendererToDisplaySize(renderer);
+
+            const canvas = renderer.domElement;
+            uniforms.iResolution.value.set(canvas.width, canvas.height, 1);
+            uniforms.iTime.value = time;
+
+            uniforms.iMouse.value.x = mouse.x;
+            uniforms.iMouse.value.y = mouse.y;
+
+            if (mouseDown) {
+                uniforms.iMouse.value.z = 1.0;
+            } else {
+                uniforms.iMouse.value.z = 0.0;
+            }
+
+            composer.render();
+            requestAnimationFrame(render);
+        }
+    </script>
+</body>
+</html>
